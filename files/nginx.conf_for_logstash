@@ -1,0 +1,28 @@
+input {
+    beats {
+        port => 5400
+    }
+}
+
+filter {
+    grok {
+        match => [ "message" , "(?<timestamp>%{YEAR}[./-]%{MONTHNUM}[./-]%{MONTHDAY}[- ]%{TIME}) \[%{LOGLEVEL:severity}\] %{POSINT:pid}#%{NUMBER}: %{GREEDYDATA:errormessage}(?:, client: (?<client>%{IP}|%{HOSTNAME}))(?:, server: %{IPORHOST:server})(?:, request: %{QS:request})?(?:, upstream: \"%{URI:upstream}\")?(?:, host: %{QS:host})?(?:, referrer: \"%{URI:referrer}\")"] overwrite => [ "message" ]
+     }
+
+    date {
+       match => [ "timestamp" , "YYYY/MM/dd HH:mm:ss" ]
+       remove_field => [ "timestamp" ]
+    }
+}
+
+output {
+ elasticsearch {
+   hosts => ["http://localhost:9200"]
+   index => "weblogs-%{+YYYY.MM.dd}"
+   document_type => "nginx_logs"
+   user => logstash
+   password => logstash
+ }
+}
+
+

@@ -1,0 +1,34 @@
+---
+- hosts: all
+  tasks:
+    - name: 'install basic packages'
+      yum:
+        name: ['wget', 'nc', 'unzip', 'screen', 'java-11-openjdk']
+        state: present
+    
+    - name: import the Elasticsearch GPG key
+      rpm_key:
+         state: present
+         key: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+
+    - name: install ELK repo
+      copy:
+        src: files/elasticsearch.repo
+        dest: /etc/yum.repos.d/elasticsearch.repo
+        mode: 0755
+
+    - name: install ELK
+      yum:
+        name: ['elasticsearch', 'kibana', 'logstash']
+        state: present
+
+    - name: enable ELK services
+      systemd:
+        name: '{{ item }}'
+        daemon_reload: yes
+        state: started
+        enabled: yes
+      with_items:
+        - elasticsearch
+        - logstash
+        - kibana

@@ -1,0 +1,98 @@
+---
+- hosts: all
+  tasks:
+    - name: Disable SELinux 
+      selinux:
+        state: disabled
+    
+    - name: install Java
+      yum:
+        name: http://192.168.0.2:8000/jdk-8u202-linux-x64.rpm
+        state: present
+
+    - name: Install core packages
+      yum:
+        name:
+          - http://192.168.0.2:8000/elasticsearch-oss-6.6.2.rpm
+          - http://192.168.0.2:8000/opendistro-performance-analyzer-0.8.0.0.rpm
+          - http://192.168.0.2:8000/opendistro-sql-0.8.0.0.rpm
+          - http://192.168.0.2:8000/opendistro-alerting-0.8.0.0.rpm 
+          - http://192.168.0.2:8000/opendistro-security-0.8.0.0.rpm
+          - http://192.168.0.2:8000/opendistroforelasticsearch-0.8.0.rpm
+          - http://192.168.0.2:8000/opendistroforelasticsearch-kibana-0.8.0.rpm
+          - http://192.168.0.2:8000/logstash-oss-6.7.1.rpm
+          - http://192.168.0.2:8000/nginx-1.14.2-1.el7_4.ngx.x86_64.rpm
+        state: present
+        disable_gpg_check: yes
+      #ignore_errors: true
+
+    - name: Copy ELK config files
+      copy:
+        src: files/{{ item }}.yml
+        dest: /etc/{{ item }}/{{ item }}.yml
+        mode: 0644
+      with_items:
+        - elasticsearch
+        - kibana
+        - logstash
+
+    - name: Create symlink needed for openelasticsearch
+      file:
+        src: /usr/java/jdk1.8.0_202-amd64/lib/tools.jar
+        dest: /usr/share/elasticsearch/lib/tools.jar
+        state: link
+
+    - name: Copy logstash.conf
+      copy:
+        src: files/logstash.conf
+        dest: /etc/logstash/conf.d/logstash.conf
+        mode: 0644
+
+    - name: Copy nginx.conf
+      copy:
+        src: files/nginx.conf
+        dest: /etc/nginx/nginx.conf
+        mode: 0644
+
+    - name: Enable and start services
+      systemd:
+        name: '{{ item }}'
+        daemon_reload: yes
+        state: restarted
+        enabled: yes
+      with_items:
+        - elasticsearch
+        - logstash
+        - kibana
+        - nginx
+
+    - name: gather running services
+      service_facts:
+      tags: firewall
+
+    - name: Allow http traffic
+      firewalld:
+        service: http
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: hostvars[inventory_hostname]['services']['firewalld.service']['state'] == "running"
+      tags: firewall
+
+    - name: Allow https traffic
+      firewalld:
+        service: https
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: hostvars[inventory_hostname]['services']['firewalld.service']['state'] == "running"
+      tags: firewall
+
+    - name: proxified Kibana healthcheck
+      uri:
+        url: 'http://{{ inventory_hostname }}/kibana'
+        register: healthcheck
+        until: healthcheck.status == 200
+        retries: 20
+        delay: 30
+
