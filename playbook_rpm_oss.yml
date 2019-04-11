@@ -1,0 +1,144 @@
+---
+- hosts: all
+  vars:
+    repohost: 'http://192.168.0.2:8000/oss'
+    node_exporter_version: '0.17.0'
+    elasticsearch_version: 'oss-6.7.1'
+    kibana_version: 'oss-6.7.1-x86_64'
+    logstash_version: 'oss-6.7.1'
+    nginx_version: '1.14.2-1.el7_4.ngx.x86_64'
+    prometheus_version: '2.8.1'
+    grafana_version: '6.1.1-1.x86_64'
+  tasks:
+    - name: Disable SELinux 
+      selinux:
+        state: disabled
+    
+    - name: install Java
+      yum:
+        name: http://192.168.0.2:8000/jdk-8u202-linux-x64.rpm
+        state: present
+
+    - name: Install core packages
+      yum:
+        name:
+          - "{{ repohost }}/elasticsearch-{{ elasticsearch_version }}.rpm"
+          - "{{ repohost }}/kibana-{{ kibana_version }}.rpm"
+          - "{{ repohost }}/logstash-{{ logstash_version }}.rpm"
+          - "{{ repohost }}/nginx-{{ nginx_version }}.rpm"
+          - "{{ repohost }}/grafana-{{ grafana_version }}.rpm"
+        state: present
+        disable_gpg_check: yes
+      #ignore_errors: true
+
+    - name: Copy ELK config files
+      copy:
+        src: files/{{ item }}-oss.yml
+        dest: /etc/{{ item }}/{{ item }}.yml
+        mode: 0644
+      with_items:
+        - elasticsearch
+        - kibana
+        - logstash
+
+    - name: Copy logstash.conf
+      copy:
+        src: files/logstash.conf
+        dest: /etc/logstash/conf.d/logstash.conf
+        mode: 0644
+
+    - name: Copy nginx.conf
+      copy:
+        src: files/nginx.conf
+        dest: /etc/nginx/nginx.conf
+        mode: 0644
+
+    - name: Deploy node_exporter
+      get_url:
+        url: "{{ repohost }}/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+        dest: /usr/local/bin/node_exporter
+        mode: 0755
+
+    - name: Copy node_exporter systemd unit
+      copy: 
+        src: files/node_exporter.service
+        dest: /etc/systemd/system/node_exporter.service
+        mode: 0644
+
+    - name: Download and extract prometheus
+      unarchive:
+        src: "{{ repohost }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        dest: /tmp
+        remote_src: yes
+
+    - name: Copy prometheus binaries
+      copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
+        dest: /usr/local/bin
+        mode: 0755
+        remote_src: yes
+      with_items:
+        - prometheus
+        - promtool
+
+    - name: Create prometheus config dir
+      file:
+        name: /etc/prometheus
+        state: directory
+        mode: 0755
+
+    - name: Copy prometheus consoles
+      command: "cp -r /tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }} /etc/prometheus"
+      with_items:
+        - consoles
+        - console_libraries
+
+    - name: Copy prometheus.yml
+      copy:
+        src: files/prometheus.yml
+        dest: /etc/prometheus
+        mode: 0644
+
+    - name: Copy prometheus systemd unit
+      copy: 
+        src: files/prometheus.service
+        dest: /etc/systemd/system/prometheus.service
+        mode: 0644
+
+    - name: Enable and start services
+      systemd:
+        name: '{{ item }}'
+        daemon_reload: yes
+        state: restarted
+        enabled: yes
+      with_items:
+        - elasticsearch
+        - logstash
+        - kibana
+        - nginx
+        - node_exporter
+        - prometheus
+        - grafana-server
+
+    - name: gather running services
+      service_facts:
+      tags: firewall
+
+    - name: Allow http traffic
+      firewalld:
+        service: http
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: hostvars[inventory_hostname]['services']['firewalld.service']['state'] == "running"
+      tags: firewall
+
+    - name: Allow https traffic
+      firewalld:
+        service: https
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: hostvars[inventory_hostname]['services']['firewalld.service']['state'] == "running"
+      tags: firewall
+
